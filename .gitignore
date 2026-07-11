@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.npm-cache/
+.env
+.env.*
+*.log
+*.map
+coverage/
+test-results/
+playwright-report/
+output/
+build/
+qa/
