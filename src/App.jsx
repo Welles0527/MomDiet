@@ -521,11 +521,22 @@ function MealIcon({ type, name }) {
   );
 }
 
-function MealRow({ meal, foods, onToggle, onAdjustTime, onAddFood, onEditUnit, onRemoveItem }) {
+function MealRow({
+  meal,
+  foods,
+  hasDailyTemplate,
+  onToggle,
+  onAdjustTime,
+  onAddFood,
+  onImportTemplate,
+  onEditUnit,
+  onRemoveItem,
+}) {
   const mealKcal = calculateMealKcal(meal, foods);
 
   return (
     <article className={`meal-row ${meal.expanded ? "is-expanded" : ""}`} data-meal-id={meal.id}>
+      <div className="meal-summary-wrap">
       <button className="meal-summary" type="button" onClick={onToggle}>
         <MealIcon type={meal.type} name={meal.name} />
         <time
@@ -541,6 +552,17 @@ function MealRow({ meal, foods, onToggle, onAdjustTime, onAddFood, onEditUnit, o
         <strong>{formatKcal(mealKcal)} kcal</strong>
         <Icon name={meal.expanded ? "expand_less" : "chevron_right"} />
       </button>
+      <button
+        className="meal-template-import"
+        type="button"
+        onClick={onImportTemplate}
+        disabled={!hasDailyTemplate}
+        aria-label={`导入${meal.time}餐食`}
+        title="导入模板餐食"
+      >
+        <Icon name="download" />
+      </button>
+      </div>
 
       {meal.expanded && (
         <div className="meal-details">
@@ -614,6 +636,36 @@ function DailySummaryDialog({ plan, foods, onClose }) {
           ))}
         </div>
       )}
+    </Dialog>
+  );
+}
+
+function TemplateMealPickerDialog({ template, targetMeal, foods, onSelect, onClose }) {
+  const foodById = Object.fromEntries(foods.map((food) => [food.id, food]));
+
+  return (
+    <Dialog title="选择导入餐次" onClose={onClose} className="template-picker-dialog">
+      <p className="template-picker-hint">
+        {targetMeal ? `当前餐次 ${targetMeal.time} 未找到相同时间，请选择要导入的模板餐食。` : "请选择要导入的模板餐食。"}
+      </p>
+      <div className="template-picker-list">
+        {(template?.meals ?? []).map((meal, index) => {
+          const labels = (meal.items ?? []).map((item) => {
+            const food = foodById[item.foodId];
+            return food ? `${food.pickerName || food.name} ${getItemUnitLabel(item, food)}` : null;
+          }).filter(Boolean);
+          return (
+            <button key={`${meal.time}-${index}`} type="button" onClick={() => onSelect(meal)}>
+              <span>
+                <strong>{meal.time}</strong>
+                <b>{meal.name}</b>
+              </span>
+              <small>{labels.length > 0 ? labels.join(" · ") : "暂无食品"}</small>
+              <Icon name="chevron_right" />
+            </button>
+          );
+        })}
+      </div>
     </Dialog>
   );
 }
@@ -787,9 +839,11 @@ function TodayScreen({
                 key={meal.id}
                 meal={meal}
                 foods={foods}
+                hasDailyTemplate={hasDailyTemplate}
                 onToggle={() => toggleAndRevealMeal(meal)}
                 onAdjustTime={() => onAdjustMealTime(meal.id)}
                 onAddFood={() => onAddFood(meal.id)}
+                onImportTemplate={() => onImportTemplate(meal.id)}
                 onEditUnit={(itemId) => onEditUnit(meal.id, itemId)}
                 onRemoveItem={(itemId) => onRemoveItem(meal.id, itemId)}
               />
@@ -1001,10 +1055,10 @@ function SettingsScreen({
             </button>
             <button type="button" className="primary-button" onClick={onImportTemplate} disabled={!dailyTemplate}>
               <Icon name="download" />
-              导入到当天
+              选择导入餐次
             </button>
           </div>
-          <p className="template-warning">导入会覆盖当天6顿餐食，不影响用药、体重和身体记录。</p>
+          <p className="template-warning">每次只导入一顿模板餐食；时间不一致时可手动选择模板餐次。</p>
         </section>
 
         <div className="settings-note">
@@ -1686,25 +1740,40 @@ export function App() {
     }));
   }
 
-  function importDailyTemplate() {
-    const template = state.settings.dailyTemplate;
-    if (!template?.meals?.length) return;
+  function importTemplateMeal(targetMealId, templateMeal) {
+    if (!templateMeal) return;
     updateSelectedPlan((plan) => ({
       ...plan,
-      meals: template.meals.map((meal) => ({
-        id: createId("meal"),
-        name: meal.name,
-        time: meal.time,
-        type: meal.type,
-        expanded: false,
-        items: (meal.items ?? []).map(({ foodId, unitOptionId, grams }) => ({
-          id: createId("item"),
-          foodId,
-          unitOptionId,
-          grams,
-        })),
-      })),
+      meals: plan.meals.map((meal) =>
+        meal.id === targetMealId
+          ? {
+              ...meal,
+              items: (templateMeal.items ?? []).map(({ foodId, unitOptionId, grams }) => ({
+                id: createId("item"),
+                foodId,
+                unitOptionId,
+                grams,
+              })),
+              expanded: true,
+            }
+          : { ...meal, expanded: false },
+      ),
     }));
+    setDialog(null);
+  }
+
+  function requestTemplateImport(mealId) {
+    const template = state.settings.dailyTemplate;
+    const fallbackMeal = selectedPlan.meals.find((meal) => meal.expanded)
+      ?? [...selectedPlan.meals].sort((first, second) => first.time.localeCompare(second.time)).at(-1);
+    const targetMeal = selectedPlan.meals.find((meal) => meal.id === (mealId ?? fallbackMeal?.id));
+    if (!template?.meals?.length || !targetMeal) return;
+    const matchingMeal = template.meals.find((meal) => meal.time === targetMeal.time);
+    if (matchingMeal) {
+      importTemplateMeal(targetMeal.id, matchingMeal);
+      return;
+    }
+    setDialog({ type: "template-picker", mealId: targetMeal.id });
   }
 
   function toggleMeal(mealId) {
@@ -1915,7 +1984,7 @@ export function App() {
               onOpenSummary={() => setDialog({ type: "summary" })}
               onVoiceCommand={handleVoiceCommand}
               hasDailyTemplate={Boolean(state.settings.dailyTemplate)}
-              onImportTemplate={importDailyTemplate}
+              onImportTemplate={requestTemplateImport}
             />
           )}
 
@@ -1971,7 +2040,7 @@ export function App() {
               onConfirm={() => setActiveTab("today")}
               dailyTemplate={state.settings.dailyTemplate}
               onSaveTemplate={saveDailyTemplate}
-              onImportTemplate={importDailyTemplate}
+              onImportTemplate={requestTemplateImport}
             />
           )}
         </div>
@@ -1994,6 +2063,16 @@ export function App() {
           <DailySummaryDialog
             plan={selectedPlan}
             foods={state.foods}
+            onClose={() => setDialog(null)}
+          />
+        )}
+
+        {dialog?.type === "template-picker" && (
+          <TemplateMealPickerDialog
+            template={state.settings.dailyTemplate}
+            targetMeal={editingMeal}
+            foods={state.foods}
+            onSelect={(templateMeal) => importTemplateMeal(dialog.mealId, templateMeal)}
             onClose={() => setDialog(null)}
           />
         )}
