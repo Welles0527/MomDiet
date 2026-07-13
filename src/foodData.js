@@ -194,7 +194,7 @@ export function createDefaultMeals() {
     {
       id: "meal-lunch",
       name: "午餐",
-      time: "11:00",
+      time: "12:00",
       type: "main",
       expanded: false,
       items: [],

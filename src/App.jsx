@@ -358,14 +358,18 @@ function normalizeStoredState(stored, fallback) {
         Array.isArray(stored.settings?.dailyTemplate?.meals)
           ? {
               savedAt: stored.settings.dailyTemplate.savedAt ?? null,
-              meals: stored.settings.dailyTemplate.meals.map((meal) => ({
-                name: meal.name,
-                time: meal.time,
-                type: meal.type,
-                items: Array.isArray(meal.items)
-                  ? meal.items.map(({ foodId, unitOptionId, grams }) => ({ foodId, unitOptionId, grams }))
-                  : [],
-              })),
+              meals: stored.settings.dailyTemplate.meals.map((meal) => {
+                const time = meal.time === "11:00" ? "12:00" : meal.time;
+                const mealMeta = getMealMetaByTime(time);
+                return {
+                  name: mealMeta.name,
+                  time,
+                  type: mealMeta.type,
+                  items: Array.isArray(meal.items)
+                    ? meal.items.map(({ foodId, unitOptionId, grams }) => ({ foodId, unitOptionId, grams }))
+                    : [],
+                };
+              }),
             }
           : null,
     },
@@ -529,6 +533,7 @@ function MealRow({
   onAdjustTime,
   onAddFood,
   onImportTemplate,
+  onRemoveMeal,
   onEditUnit,
   onRemoveItem,
 }) {
@@ -552,16 +557,25 @@ function MealRow({
         <strong>{formatKcal(mealKcal)} kcal</strong>
         <Icon name={meal.expanded ? "expand_less" : "chevron_right"} />
       </button>
-      <button
-        className="meal-template-import"
+        <button
+          className="meal-template-import"
         type="button"
         onClick={onImportTemplate}
         disabled={!hasDailyTemplate}
         aria-label={`导入${meal.time}餐食`}
         title="导入模板餐食"
       >
-        <Icon name="download" />
-      </button>
+          <Icon name="download" />
+        </button>
+        <button
+          className="meal-remove"
+          type="button"
+          onClick={onRemoveMeal}
+          aria-label={`删除${meal.time}餐次`}
+          title="删除餐次"
+        >
+          <Icon name="delete" />
+        </button>
       </div>
 
       {meal.expanded && (
@@ -686,6 +700,7 @@ function TodayScreen({
   onVoiceCommand,
   hasDailyTemplate,
   onImportTemplate,
+  onRemoveMeal,
 }) {
   const dateInputRef = useRef(null);
   const mealScrollRef = useRef(null);
@@ -844,6 +859,7 @@ function TodayScreen({
                 onAdjustTime={() => onAdjustMealTime(meal.id)}
                 onAddFood={() => onAddFood(meal.id)}
                 onImportTemplate={() => onImportTemplate(meal.id)}
+                onRemoveMeal={() => onRemoveMeal(meal.id)}
                 onEditUnit={(itemId) => onEditUnit(meal.id, itemId)}
                 onRemoveItem={(itemId) => onRemoveItem(meal.id, itemId)}
               />
@@ -951,6 +967,7 @@ function FoodLibraryScreen({ foods, onAddFood, onEditFood, onToggleArchive }) {
 function SettingsScreen({
   dateKey,
   plan,
+  foods,
   defaultTarget,
   onUpdatePlanTarget,
   onUpdateDefaultTarget,
@@ -958,6 +975,7 @@ function SettingsScreen({
   dailyTemplate,
   onSaveTemplate,
   onImportTemplate,
+  onEditTemplateMeal,
 }) {
   const [currentDraft, setCurrentDraft] = useState(String(plan.targetKcal));
   const [defaultDraft, setDefaultDraft] = useState(String(defaultTarget));
@@ -1061,6 +1079,23 @@ function SettingsScreen({
           <p className="template-warning">每次只导入一顿模板餐食；时间不一致时可手动选择模板餐次。</p>
         </section>
 
+        {dailyTemplate?.meals?.length > 0 && (
+          <div className="template-meal-list" aria-label="编辑每日模板餐次">
+            {dailyTemplate.meals.map((meal, index) => (
+              <article key={`${meal.time}-${index}`} className="template-meal-card">
+                <div>
+                  <strong>{meal.time} · {meal.name}</strong>
+                  <p>{meal.items?.length ? meal.items.map((item) => {
+                    const food = foods.find((candidate) => candidate.id === item.foodId);
+                    return food ? `${food.pickerName || food.name} ${getItemUnitLabel(item, food)}` : null;
+                  }).filter(Boolean).join(" · ") : "暂无食品"}</p>
+                </div>
+                <button type="button" aria-label={`编辑${meal.time}模板`} onClick={() => onEditTemplateMeal(index)}><Icon name="edit" /></button>
+              </article>
+            ))}
+          </div>
+        )}
+
         <div className="settings-note">
           <Icon name="info" />
           <p>单位表保存的是 kcal/1g。克数变化后，单项、餐次和全天能量会立即重新计算。</p>
@@ -1097,7 +1132,7 @@ function HealthScreen({
   const canSaveWeight = Number.isFinite(weightValue) && weightValue > 0 && weightValue < 500;
 
   return (
-    <section className="utility-screen" aria-label="吃药记录">
+    <section className="utility-screen medication-screen" aria-label="吃药记录">
       <header className="utility-header">
         <p>{formatDateLabel(dateKey)}</p>
         <h1>吃药记录</h1>
@@ -1206,11 +1241,94 @@ function HealthScreen({
   );
 }
 
+function WeightTrendChart({ history }) {
+  if (history.length < 2) {
+    return <p className="weight-trend-empty">至少记录两天体重后显示趋势图。</p>;
+  }
+  const width = 320;
+  const height = 150;
+  const padding = { top: 18, right: 18, bottom: 28, left: 30 };
+  const values = history.map((entry) => entry.weightKg);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(max - min, 1);
+  const points = history.map((entry, index) => {
+    const x = padding.left + (index / (history.length - 1)) * (width - padding.left - padding.right);
+    const y = padding.top + ((max - entry.weightKg) / range) * (height - padding.top - padding.bottom);
+    return { ...entry, x, y };
+  });
+  return (
+    <div className="weight-trend-chart">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="体重趋势图">
+        <line x1={padding.left} x2={width - padding.right} y1={height - padding.bottom} y2={height - padding.bottom} />
+        <polyline points={points.map((point) => `${point.x},${point.y}`).join(" ")} />
+        {points.map((point) => <circle key={point.dateKey} cx={point.x} cy={point.y} r="4" />)}
+      </svg>
+      <div className="weight-trend-labels">
+        <span>{history[0].dateKey.slice(5).replace("-", "/")}</span>
+        <strong>{min.toFixed(1)}–{max.toFixed(1)} kg</strong>
+        <span>{history.at(-1).dateKey.slice(5).replace("-", "/")}</span>
+      </div>
+    </div>
+  );
+}
+
+function WeightScreen({
+  dateKey,
+  records,
+  weightKg,
+  weightHistory,
+  onSaveWeight,
+  onAddRecord,
+  onDeleteRecord,
+}) {
+  const [weightDraft, setWeightDraft] = useState(weightKg ? String(weightKg) : "");
+  const sortedRecords = [...records].sort((first, second) => second.time.localeCompare(first.time));
+  useEffect(() => setWeightDraft(weightKg ? String(weightKg) : ""), [dateKey, weightKg]);
+  const weightValue = Number(weightDraft);
+  const canSaveWeight = Number.isFinite(weightValue) && weightValue > 0 && weightValue < 500;
+
+  return (
+    <section className="utility-screen weight-screen" aria-label="体重记录">
+      <header className="utility-header">
+        <p>{formatDateLabel(dateKey)}</p>
+        <h1>体重记录</h1>
+        <button type="button" className="header-action" onClick={onAddRecord}><Icon name="add_circle" />情况</button>
+      </header>
+      <div className="utility-sheet health-sheet">
+        <section className="health-section weight-trend-section">
+          <header><div><h2>体重趋势</h2><p>按日期查看体重变化</p></div><Icon name="monitor_weight" /></header>
+          <WeightTrendChart history={weightHistory} />
+        </section>
+        <section className="health-section weight-section">
+          <header><div><h2>今日体重</h2><p>每天保存一次，可随时修改</p></div><Icon name="monitor_weight" /></header>
+          <div className="weight-entry">
+            <label><input min="1" max="499.9" step="0.1" type="number" value={weightDraft} onChange={(event) => setWeightDraft(event.target.value)} onFocus={(event) => event.currentTarget.select()} placeholder="0.0" /><span>kg</span></label>
+            <button type="button" onClick={() => canSaveWeight && onSaveWeight(weightValue)} disabled={!canSaveWeight}>{weightKg ? "更新" : "保存"}</button>
+          </div>
+        </section>
+        <section className="health-section situation-section">
+          <header><div><h2>身体情况</h2><p>打嗝、不舒服或其他情况</p></div><button type="button" onClick={onAddRecord}><Icon name="add_circle" />记录</button></header>
+          {sortedRecords.length === 0 ? <p className="health-empty-note">今天还没有身体情况记录</p> : (
+            <div className="record-list">
+              {sortedRecords.map((record) => {
+                const recordType = RECORD_TYPES.find((type) => type.id === record.type) ?? RECORD_TYPES[2];
+                return <article className="record-row" key={record.id}><span className="record-icon"><Icon name={recordType.icon} /></span><div><strong>{recordType.label}</strong><time>{record.time}</time><p>{record.note || "未填写备注"}</p></div><button type="button" aria-label={`删除${recordType.label}记录`} onClick={() => onDeleteRecord(record.id)}><Icon name="delete" /></button></article>;
+              })}
+            </div>
+          )}
+        </section>
+      </div>
+    </section>
+  );
+}
+
 function BottomNavigation({ activeTab, onChange }) {
   const items = [
     { id: "today", label: "今日", icon: "eco" },
     { id: "foods", label: "食品库", icon: "soup_kitchen" },
     { id: "records", label: "吃药", icon: "health_metrics" },
+    { id: "weight", label: "体重", icon: "monitor_weight" },
     { id: "settings", label: "设置", icon: "settings" },
   ];
 
@@ -1318,6 +1436,125 @@ function MealDialog({ initialMeal, onSave, onClose }) {
         </div>
         <p className="meal-auto-name">将自动归类为：<strong>{mealMeta.name}</strong></p>
         <button className="primary-button" type="submit">确定</button>
+      </form>
+    </Dialog>
+  );
+}
+
+function TemplateMealEditorDialog({ meal, foods, onSave, onClose }) {
+  const [time, setTime] = useState(meal?.time ?? "12:00");
+  const [items, setItems] = useState(() =>
+    (meal?.items ?? []).map((item) => ({ ...item, id: item.id ?? createId("template-item") })),
+  );
+  const [selectedFoodId, setSelectedFoodId] = useState(null);
+  const [editingItemId, setEditingItemId] = useState(null);
+  const mealMeta = getMealMetaByTime(time);
+  const morningTimes = HALF_HOUR_TIMES.filter((timeOption) => timeOption < "12:00");
+  const afternoonTimes = HALF_HOUR_TIMES.filter((timeOption) => timeOption >= "12:00");
+  const availableFoods = foods.filter((food) => !food.archived);
+  const selectedFood = availableFoods.find((food) => food.id === selectedFoodId);
+
+  function chooseFood(food) {
+    if (food.unitOptions.length === 1) {
+      applyUnit(food.id, food.unitOptions[0].id);
+      return;
+    }
+    setSelectedFoodId(food.id);
+  }
+
+  function applyUnit(foodId, unitOptionId) {
+    setItems((current) => {
+      if (editingItemId) {
+        return current.map((item) => item.id === editingItemId ? { ...item, foodId, unitOptionId } : item);
+      }
+      return [...current, { id: createId("template-item"), foodId, unitOptionId }];
+    });
+    setSelectedFoodId(null);
+    setEditingItemId(null);
+  }
+
+  return (
+    <Dialog title="编辑模板餐次" onClose={onClose} className="template-editor-dialog">
+      <form
+        className="dialog-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave({
+            ...meal,
+            ...mealMeta,
+            time,
+            items: items.map(({ foodId, unitOptionId, grams }) => ({ foodId, unitOptionId, grams })),
+          });
+        }}
+      >
+        <div className="meal-time-groups" aria-label="选择模板时间">
+          <fieldset>
+            <legend>上午</legend>
+            <div>
+              {morningTimes.map((timeOption) => (
+                <button className={time === timeOption ? "is-selected" : ""} key={timeOption} type="button" onClick={() => setTime(timeOption)}>
+                  {timeOption}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>下午</legend>
+            <div>
+              {afternoonTimes.map((timeOption) => (
+                <button className={time === timeOption ? "is-selected" : ""} key={timeOption} type="button" onClick={() => setTime(timeOption)}>
+                  {timeOption}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+        </div>
+        <p className="meal-auto-name">将自动归类为：<strong>{mealMeta.name}</strong></p>
+
+        <section className="template-editor-items" aria-label="模板食品">
+          <div className="template-editor-heading"><strong>本餐模板食品</strong><span>{items.length} 项</span></div>
+          {items.length === 0 ? (
+            <p className="template-editor-empty">还没有食品，请从下方添加。</p>
+          ) : (
+            items.map((item) => {
+              const food = foods.find((candidate) => candidate.id === item.foodId);
+              if (!food) return null;
+              return (
+                <div className="template-editor-item" key={item.id}>
+                  <span>{food.pickerName || food.name} · {getItemUnitLabel(item, food)}</span>
+                  <button type="button" aria-label={`调整${food.name}数量`} onClick={() => { setEditingItemId(item.id); setSelectedFoodId(item.foodId); }}><Icon name="edit" /></button>
+                  <button type="button" aria-label={`删除${food.name}`} onClick={() => setItems((current) => current.filter((candidate) => candidate.id !== item.id))}><Icon name="close" /></button>
+                </div>
+              );
+            })
+          )}
+        </section>
+
+        {selectedFood ? (
+          <section className="template-editor-unit-step">
+            <div className="template-editor-heading"><strong>{selectedFood.pickerName || selectedFood.name}</strong><button type="button" onClick={() => { setSelectedFoodId(null); setEditingItemId(null); }}>返回食品</button></div>
+            <div className="unit-option-grid">
+              {selectedFood.unitOptions.map((unitOption) => (
+                <button key={unitOption.id} type="button" onClick={() => applyUnit(selectedFood.id, unitOption.id)}>{unitOption.label}</button>
+              ))}
+            </div>
+          </section>
+        ) : (
+          <section className="template-editor-foods" aria-label="添加模板食品">
+            {FOOD_CATEGORIES.map((category) => {
+              const categoryFoods = availableFoods.filter((food) => food.category === category.id);
+              if (categoryFoods.length === 0) return null;
+              return (
+                <div key={category.id}>
+                  <h3>{category.label}</h3>
+                  <div>{categoryFoods.map((food) => <button key={food.id} type="button" onClick={() => chooseFood(food)}>{food.pickerName || food.name}<Icon name="add_circle" /></button>)}</div>
+                </div>
+              );
+            })}
+          </section>
+        )}
+
+        <button className="primary-button" type="submit">保存模板餐次</button>
       </form>
     </Dialog>
   );
@@ -1672,6 +1909,13 @@ export function App() {
     () => Object.fromEntries(state.foods.map((food) => [food.id, food])),
     [state.foods],
   );
+  const weightHistory = useMemo(
+    () => Object.entries(state.plans)
+      .filter(([, plan]) => Number(plan?.weightKg) > 0)
+      .map(([dateKey, plan]) => ({ dateKey, weightKg: Number(plan.weightKg) }))
+      .sort((first, second) => first.dateKey.localeCompare(second.dateKey)),
+    [state.plans],
+  );
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -1703,6 +1947,13 @@ export function App() {
     updateSelectedPlan((plan) => ({
       ...plan,
       meals: plan.meals.map((meal) => (meal.id === mealId ? updater(meal) : meal)),
+    }));
+  }
+
+  function removeMeal(mealId) {
+    updateSelectedPlan((plan) => ({
+      ...plan,
+      meals: plan.meals.filter((meal) => meal.id !== mealId),
     }));
   }
 
@@ -1738,6 +1989,25 @@ export function App() {
         dailyTemplate: { savedAt: new Date().toISOString(), meals: templateMeals },
       },
     }));
+  }
+
+  function saveTemplateMeal(index, meal) {
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        dailyTemplate: current.settings.dailyTemplate
+          ? {
+              ...current.settings.dailyTemplate,
+              savedAt: new Date().toISOString(),
+              meals: current.settings.dailyTemplate.meals.map((currentMeal, mealIndex) =>
+                mealIndex === index ? meal : currentMeal,
+              ),
+            }
+          : current.settings.dailyTemplate,
+      },
+    }));
+    setDialog(null);
   }
 
   function importTemplateMeal(targetMealId, templateMeal) {
@@ -1951,6 +2221,9 @@ export function App() {
   const editingMeal = dialog?.mealId
     ? selectedPlan.meals.find((meal) => meal.id === dialog.mealId)
     : null;
+  const editingTemplateMeal = dialog?.type === "template-meal-editor"
+    ? state.settings.dailyTemplate?.meals?.[dialog.templateIndex]
+    : null;
   const editingFood = dialog?.foodId ? foodById[dialog.foodId] : null;
   const editingItem = dialog?.itemId
     ? editingMeal?.items.find((item) => item.id === dialog.itemId)
@@ -1981,6 +2254,7 @@ export function App() {
               }
               onAddFood={(mealId) => setDialog({ type: "add-food", mealId })}
               onAddMeal={() => setDialog({ type: "meal" })}
+              onRemoveMeal={removeMeal}
               onOpenSummary={() => setDialog({ type: "summary" })}
               onVoiceCommand={handleVoiceCommand}
               hasDailyTemplate={Boolean(state.settings.dailyTemplate)}
@@ -2017,10 +2291,23 @@ export function App() {
             />
           )}
 
+          {activeTab === "weight" && (
+            <WeightScreen
+              dateKey={selectedDate}
+              records={selectedPlan.records ?? []}
+              weightKg={selectedPlan.weightKg}
+              weightHistory={weightHistory}
+              onSaveWeight={saveWeight}
+              onAddRecord={() => setDialog({ type: "record" })}
+              onDeleteRecord={deleteRecord}
+            />
+          )}
+
           {activeTab === "settings" && (
             <SettingsScreen
               dateKey={selectedDate}
               plan={selectedPlan}
+              foods={state.foods}
               defaultTarget={state.settings.defaultTargetKcal}
               onUpdatePlanTarget={(targetKcal) =>
                 updateSelectedPlan((plan) => ({
@@ -2041,6 +2328,7 @@ export function App() {
               dailyTemplate={state.settings.dailyTemplate}
               onSaveTemplate={saveDailyTemplate}
               onImportTemplate={requestTemplateImport}
+              onEditTemplateMeal={(templateIndex) => setDialog({ type: "template-meal-editor", templateIndex })}
             />
           )}
         </div>
@@ -2073,6 +2361,15 @@ export function App() {
             targetMeal={editingMeal}
             foods={state.foods}
             onSelect={(templateMeal) => importTemplateMeal(dialog.mealId, templateMeal)}
+            onClose={() => setDialog(null)}
+          />
+        )}
+
+        {dialog?.type === "template-meal-editor" && editingTemplateMeal && (
+          <TemplateMealEditorDialog
+            meal={editingTemplateMeal}
+            foods={state.foods}
+            onSave={(meal) => saveTemplateMeal(dialog.templateIndex, meal)}
             onClose={() => setDialog(null)}
           />
         )}
