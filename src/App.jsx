@@ -312,7 +312,7 @@ function normalizeFood(food) {
   };
 }
 
-function ensureDefaultMeals(plan) {
+function ensureDefaultMeals(plan, fillMissing = false) {
   const defaultsById = Object.fromEntries(createDefaultMeals().map((meal) => [meal.id, meal]));
   const currentMeals = (Array.isArray(plan?.meals) ? plan.meals : []).map((meal) => {
     const defaultMeal = defaultsById[meal.id];
@@ -321,9 +321,11 @@ function ensureDefaultMeals(plan) {
       : meal;
   });
   const currentTimes = new Set(currentMeals.map((meal) => meal.time));
-  const missingMeals = createDefaultMeals()
-    .filter((meal) => !currentTimes.has(meal.time))
-    .map((meal) => ({ ...meal, id: createId("meal") }));
+  const missingMeals = fillMissing
+    ? createDefaultMeals()
+      .filter((meal) => !currentTimes.has(meal.time))
+      .map((meal) => ({ ...meal, id: createId("meal") }))
+    : [];
   return {
     ...plan,
     meals: [...currentMeals, ...missingMeals],
@@ -381,7 +383,7 @@ function normalizeStoredState(stored, fallback) {
               ensureDefaultMeals({
                 ...plan,
                 targetKcal: isTargetMigration ? DEFAULT_TARGET_KCAL : plan.targetKcal,
-              }),
+              }, isTargetMigration),
             ]),
           )
         : fallback.plans,
