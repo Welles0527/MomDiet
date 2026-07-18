@@ -182,6 +182,127 @@ a:focus-visible {
   transition: background-color 240ms ease;
 }
 
+.shared-login-stage {
+  color: var(--text-light);
+  background:
+    radial-gradient(circle at 50% 12%, rgba(201, 227, 106, 0.16), transparent 30%),
+    var(--green-950);
+}
+
+.shared-login-card {
+  width: min(calc(100vw - 32px), 390px);
+  padding: clamp(36px, 8vh, 72px) 28px 32px;
+  color: var(--text-light);
+  background: var(--green-900);
+  border: 1px solid rgba(201, 227, 106, 0.2);
+  border-radius: 24px;
+  box-shadow: 0 30px 90px rgba(0, 31, 18, 0.34);
+}
+
+.shared-login-mark {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  margin-bottom: 26px;
+  color: var(--green-950);
+  background: var(--lime-500);
+  border-radius: 18px;
+  place-items: center;
+}
+
+.shared-login-mark .icon {
+  font-size: 32px;
+}
+
+.shared-login-kicker {
+  margin: 0 0 8px;
+  color: var(--lime-500);
+  font-family: "Manrope", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.shared-login-card h1 {
+  margin: 0;
+  font-size: clamp(30px, 8vw, 40px);
+  line-height: 1.12;
+}
+
+.shared-login-copy {
+  margin: 16px 0 26px;
+  color: rgba(255, 253, 246, 0.72);
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.shared-login-form {
+  display: grid;
+  gap: 15px;
+}
+
+.shared-login-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.shared-login-form label span {
+  color: rgba(255, 253, 246, 0.76);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.shared-login-form input {
+  width: 100%;
+  height: 48px;
+  padding: 0 14px;
+  color: var(--text-light);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+}
+
+.shared-login-form input:focus {
+  border-color: var(--lime-500);
+}
+
+.shared-login-actions {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 6px;
+}
+
+.shared-login-actions button {
+  min-height: 46px;
+  padding: 0 14px;
+  color: var(--green-950);
+  cursor: pointer;
+  background: var(--lime-500);
+  border: 1px solid var(--lime-500);
+  border-radius: 12px;
+  font-weight: 800;
+}
+
+.shared-login-actions button.is-secondary {
+  color: var(--text-light);
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.shared-login-actions button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.shared-login-status {
+  min-height: 22px;
+  margin: 18px 0 0;
+  color: var(--lime-400);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .mobile-prototype {
   position: relative;
   width: min(100vw, 390px);
@@ -535,14 +656,14 @@ a:focus-visible {
   display: grid;
   width: 100%;
   height: 52px;
-  padding: 0;
+  padding: 0 84px 0 0;
   align-items: center;
   color: var(--ink);
   cursor: pointer;
   background: transparent;
   border: 0;
-  grid-template-columns: 38px 56px minmax(0, 1fr) 67px 18px;
-  gap: 7px;
+  grid-template-columns: 34px 48px minmax(0, 1fr) 70px 16px;
+  gap: 6px;
   text-align: left;
 }
 
@@ -645,9 +766,24 @@ a:focus-visible {
   white-space: nowrap;
 }
 
-.meal-summary strong {
+.meal-total {
+  display: grid;
+  min-width: 0;
+  justify-items: end;
+  line-height: 1.05;
+}
+
+.meal-total small {
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.meal-total strong {
   color: var(--green-900);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   text-align: right;
   white-space: nowrap;
@@ -2483,6 +2619,19 @@ a:focus-visible {
   }
 
   .mobile-prototype {
+    box-shadow: none;
+  }
+
+  .shared-login-stage {
+    padding: 0;
+  }
+
+  .shared-login-card {
+    width: 100%;
+    min-height: 100dvh;
+    padding: max(38px, env(safe-area-inset-top)) 24px max(28px, env(safe-area-inset-bottom));
+    border: 0;
+    border-radius: 0;
     box-shadow: none;
   }
 }

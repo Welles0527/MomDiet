@@ -12,6 +12,12 @@ import {
   getItemUnitLabel,
   seedFoods,
 } from "./foodData.js";
+import {
+  getCloudSession,
+  getRememberedSession,
+  signInWithPassword,
+  startEmailSignUp,
+} from "./site-auth.js";
 
 const STORAGE_KEY = "food-energy-planner.v9";
 const LEGACY_STORAGE_KEYS = ["food-energy-planner.v8", "food-energy-planner.v7", "food-energy-planner.v6", "food-energy-planner.v5", "food-energy-planner.v4", "food-energy-planner.v3", "food-energy-planner.v2"];
@@ -361,7 +367,11 @@ function normalizeStoredState(stored, fallback) {
           ? {
               savedAt: stored.settings.dailyTemplate.savedAt ?? null,
               meals: stored.settings.dailyTemplate.meals.map((meal) => {
-                const time = meal.time === "11:00" ? "12:00" : meal.time;
+                const time = meal.time === "11:00"
+                  ? "12:00"
+                  : meal.time === "15:30"
+                    ? "15:00"
+                    : meal.time;
                 const mealMeta = getMealMetaByTime(time);
                 return {
                   name: mealMeta.name,
@@ -417,6 +427,131 @@ function Icon({ name, filled = false, className = "" }) {
     >
       {name}
     </span>
+  );
+}
+
+function SharedLoginScreen({ checking = false, message = "", onAuthenticated }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [pending, setPending] = useState(false);
+  const [status, setStatus] = useState(message);
+  const completeEmailSignUp = useRef(null);
+
+  useEffect(() => {
+    if (message) setStatus(message);
+  }, [message]);
+
+  function credentials() {
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail || !password) throw new Error("请先填写邮箱和密码。");
+    if (password.length < 8) throw new Error("密码至少需要 8 位。");
+    return { email: normalizedEmail, password };
+  }
+
+  async function handleLogin(event) {
+    event.preventDefault();
+    try {
+      setPending(true);
+      setStatus("正在登录主站账号…");
+      const values = credentials();
+      onAuthenticated(await signInWithPassword(values.email, values.password));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "登录失败，请稍后重试。");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function handleSignUp() {
+    try {
+      setPending(true);
+      if (completeEmailSignUp.current) {
+        if (!verificationCode.trim()) throw new Error("请输入邮箱收到的验证码。");
+        setStatus("正在验证邮箱并创建账号…");
+        onAuthenticated(await completeEmailSignUp.current(verificationCode.trim()));
+        return;
+      }
+
+      const values = credentials();
+      setStatus("正在发送邮箱验证码…");
+      completeEmailSignUp.current = await startEmailSignUp(values.email, values.password);
+      setStatus("验证码已发送到邮箱，请填写后完成注册。");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "创建账号失败，请稍后重试。");
+      if (completeEmailSignUp.current) completeEmailSignUp.current = null;
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="prototype-stage shared-login-stage">
+      <main className="shared-login-card" aria-busy={checking || pending}>
+        <div className="shared-login-mark" aria-hidden="true">
+          <Icon name="nutrition" filled />
+        </div>
+        <p className="shared-login-kicker">MAGIC J · 统一账号</p>
+        <h1>每日能量计划</h1>
+        <p className="shared-login-copy">
+          {checking
+            ? "正在读取圣经微读与待办使用的登录状态…"
+            : "登录一次即可使用主站账号；如果已经在圣经微读或待办登录，这里会直接进入。"}
+        </p>
+
+        {!checking && (
+          <form className="shared-login-form" onSubmit={handleLogin}>
+            <label>
+              <span>邮箱</span>
+              <input
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                disabled={pending}
+                required
+              />
+            </label>
+            <label>
+              <span>密码</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                disabled={pending}
+                minLength={8}
+                required
+              />
+            </label>
+            {completeEmailSignUp.current && (
+              <label>
+                <span>邮箱验证码</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={verificationCode}
+                  onChange={(event) => setVerificationCode(event.target.value)}
+                  disabled={pending}
+                  required
+                />
+              </label>
+            )}
+            <div className="shared-login-actions">
+              <button type="submit" disabled={pending}>登录</button>
+              <button type="button" className="is-secondary" onClick={handleSignUp} disabled={pending}>
+                {completeEmailSignUp.current ? "完成注册" : "创建账号"}
+              </button>
+            </div>
+          </form>
+        )}
+
+        <p className="shared-login-status" role="status">
+          {checking ? "正在连接…" : status || "登录状态默认保留 3 天。"}
+        </p>
+      </main>
+    </div>
   );
 }
 
@@ -556,7 +691,10 @@ function MealRow({
           {meal.time}
         </time>
         <span className="meal-name">{meal.name}</span>
-        <strong>{formatKcal(mealKcal)} kcal</strong>
+        <span className="meal-total" aria-label={`本餐合计 ${formatKcal(mealKcal)} 千卡`}>
+          <small>合计</small>
+          <strong>{formatKcal(mealKcal)} kcal</strong>
+        </span>
         <Icon name={meal.expanded ? "expand_less" : "chevron_right"} />
       </button>
         <button
@@ -1905,6 +2043,9 @@ export function App() {
   const [selectedDate, setSelectedDate] = useState(toLocalDateKey);
   const [activeTab, setActiveTab] = useState("today");
   const [dialog, setDialog] = useState(null);
+  const [authSession, setAuthSession] = useState(getRememberedSession);
+  const [authResolved, setAuthResolved] = useState(() => Boolean(getRememberedSession()));
+  const [authMessage, setAuthMessage] = useState("");
 
   const selectedPlan = state.plans[selectedDate] ?? createPlan(state.settings.defaultTargetKcal);
   const foodById = useMemo(
@@ -1933,6 +2074,39 @@ export function App() {
       },
     }));
   }, [selectedDate, state.plans]);
+
+  useEffect(() => {
+    let active = true;
+    getCloudSession()
+      .then((session) => {
+        if (!active) return;
+        setAuthSession(session);
+        setAuthResolved(true);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setAuthResolved(true);
+        if (!authSession) {
+          setAuthMessage(error instanceof Error ? error.message : "无法读取主站登录状态，请重试。");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (!authResolved) return <SharedLoginScreen checking onAuthenticated={setAuthSession} />;
+  if (!authSession) {
+    return (
+      <SharedLoginScreen
+        message={authMessage}
+        onAuthenticated={(session) => {
+          setAuthSession(session);
+          setAuthMessage("");
+        }}
+      />
+    );
+  }
 
   function updateSelectedPlan(updater) {
     setState((current) => {
